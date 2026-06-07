@@ -64,7 +64,7 @@ curl -s -X POST "$WEBHOOK_URL" \
     "msg_type": "interactive",
     "card": {
       "header": {
-        "title": {"tag": "plain_text", "content": "TITLE"},
+        "title": {"tag": "plain_text", "content": "ARIS · TITLE"},
         "template": "COLOR"
       },
       "elements": [
@@ -78,12 +78,12 @@ curl -s -X POST "$WEBHOOK_URL" \
 
 | Event | Title | Color | Body |
 |-------|-------|-------|------|
-| `experiment_done` | Experiment Complete | `green` | Results table, delta vs baseline |
-| `review_scored` | Review Round N: X/10 | `blue` (≥6) / `orange` (<6) | Score, verdict, top 3 weaknesses |
-| `checkpoint` | Checkpoint: Waiting for Input | `yellow` | Question, options, context |
-| `error` | Error: [type] | `red` | Error message, what failed |
-| `pipeline_done` | Pipeline Complete | `purple` | Final summary, deliverables |
-| `custom` | Custom | `blue` | Free-form message from $ARGUMENTS |
+| `experiment_done` | ARIS · Experiment Complete | `green` | Results table, delta vs baseline |
+| `review_scored` | ARIS · Review Round N: X/10 | `blue` (≥6) / `orange` (<6) | Score, verdict, top 3 weaknesses |
+| `checkpoint` | ARIS · Checkpoint: Waiting for Input | `yellow` | Question, options, context |
+| `error` | ARIS · Error: [type] | `red` | Error message, what failed |
+| `pipeline_done` | ARIS · Pipeline Complete | `purple` | Final summary, deliverables |
+| `custom` | ARIS · Custom | `blue` | Free-form message from $ARGUMENTS |
 
 **Return immediately after curl** — push mode never waits for a response.
 
@@ -95,7 +95,7 @@ Interactive mode uses [feishu-claude-code](https://github.com/joewongjc/feishu-c
    ```bash
    curl -s -X POST "$BRIDGE_URL/send" \
      -H "Content-Type: application/json" \
-     -d '{"type": "EVENT_TYPE", "title": "TITLE", "body": "BODY", "options": ["approve", "reject", "custom"]}'
+     -d '{"type": "EVENT_TYPE", "title": "ARIS · TITLE", "body": "BODY", "options": ["approve", "reject", "custom"]}'
    ```
 
 2. **Wait for reply** (with timeout):
