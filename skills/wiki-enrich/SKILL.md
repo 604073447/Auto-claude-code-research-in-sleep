@@ -2,7 +2,7 @@
 name: wiki-enrich
 description: "Fill in the per-paper TODO sections of research-wiki/papers/<slug>.md pages that literature-ingest skills leave as bare scaffolds. Use when user says 'enrich wiki', 'fill paper TODOs', 'wiki body 補完', '把 paper 摘要寫進 wiki', 'research-wiki 自動填', or after a batch ingest that left papers/ as TODO scaffolds."
 argument-hint: "[target: slug|missing|all] [--source alphaxiv|deepxiv|arxiv|auto] [--force] [--max N]"
-allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, WebFetch
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, WebFetch, mcp__paper-fetch__fetch_paper, mcp__paper-fetch__has_fulltext, mcp__paper-fetch__resolve_paper
 ---
 
 # Wiki Enrich: Fill Paper TODO Sections (Karpathy LLM-Wiki)
@@ -23,7 +23,7 @@ This contradicts the Karpathy LLM-wiki design (https://gist.github.com/karpathy/
 
 - **WIKI_ROOT = `research-wiki/`** — Resolved relative to git root. Skill hard-fails if not a directory.
 - **TARGET_DEFAULT = `missing`** — When no target is given, enrich only papers with ≥1 TODO section. Other targets: `<slug>` (one paper) or `all` (every paper, even ones already enriched — usually combined with `--force` to overwrite).
-- **SOURCE_DEFAULT = `auto`** — Fetch order: alphaxiv overview → alphaxiv abs → deepxiv brief → arXiv API abstract → page abstract fallback. First non-empty wins (full chain documented in Phase 2.3 table). Override with `--source` to pin one source.
+- **SOURCE_DEFAULT = `auto`** — Fetch order: paper-fetch full text → alphaxiv overview → alphaxiv abs → deepxiv brief → arXiv API abstract → page abstract fallback. First non-empty wins (full chain documented in Phase 2.3 table). Override with `--source` to pin one source.
 - **MAX_PAPERS = 20** — Hard cap per invocation; LLMs touch many files but token budgets are real. Override with `--max N`.
 - **FORCE = false** — When `false` (default), skip sections that already have non-TODO content. When `true`, overwrite every fillable section, but **never** touch the two protected sections: `## Connections` (auto-generated from `edges.jsonl`) and `## Abstract (original)` (immutable arXiv-fetched source data).
 - **SECTIONS_TO_FILL** — 10 fillable sections + 2 protected. `ingest_paper` (`research_wiki.py:436-473`) scaffolds 11 section headers unconditionally and a 12th — `## Abstract (original)` — only when arXiv returns an abstract for the given `--arxiv-id` (`research_wiki.py:469-473`). Of these, 10 carry a `_TODO._` (or `_TODO: fill in after reading._`) marker and need filling. The other 2 — `## Connections` (position 10 in the enumeration below) and `## Abstract (original)` (position 12, conditional) — are protected by construction: `Connections` is auto-generated from `graph/edges.jsonl`, `Abstract (original)` is immutable source data from the arXiv API. This skill writes to the 10, never the 2.
@@ -128,14 +128,17 @@ The fetch chain runs **in order** until one returns usable content (>200 chars o
 
 | Order | Source | How |
 |-------|--------|-----|
-| 1 | **alphaxiv overview** (`auto` default; `--source alphaxiv` to pin) | `WebFetch https://alphaxiv.org/overview/<arxiv_id>.md` — LLM-optimized summary, often best for filling sections |
-| 2 | **alphaxiv abs** (fallback within alphaxiv) | `WebFetch https://alphaxiv.org/abs/<arxiv_id>.md` |
-| 3 | **deepxiv brief** (`--source deepxiv` to pin) | `python3 "$DEEPXIV_FETCHER" paper-brief <arxiv_id>` if helper resolves |
-| 4 | **arXiv API abstract — fresh fetch** (`--source arxiv` to pin) | `curl http://export.arxiv.org/api/query?id_list=<arxiv_id>` — log label: `arxiv-api-abstract` |
-| 5 | **Page abstract — fallback** (last resort) | Reuse the existing `## Abstract (original)` blockquote already present in the page body from a prior `ingest_paper` run — log label: `page-abstract-fallback` |
-| — | **No arxiv id + no page abstract** | Skip this paper, log `"skip: <slug> (no arxiv id, no abstract)"`, continue |
+| 1 | **paper-fetch full text** (`auto` default; `--source paper-fetch` to pin) | `mcp__paper-fetch__fetch_paper(query=<doi_or_arxiv_id>)` with `save_markdown=true`. If full-text Markdown is obtained (>2000 chars of body text), use it directly. This provides complete Method / Results / Limitations from the actual paper, not a summary. |
+| 2 | **alphaxiv overview** (`--source alphaxiv` to pin) | `WebFetch https://alphaxiv.org/overview/<arxiv_id>.md` — LLM-optimized summary |
+| 3 | **alphaxiv abs** (fallback within alphaxiv) | `WebFetch https://alphaxiv.org/abs/<arxiv_id>.md` |
+| 4 | **deepxiv brief** (`--source deepxiv` to pin) | `python3 "$DEEPXIV_FETCHER" paper-brief <arxiv_id>` if helper resolves |
+| 5 | **arXiv API abstract — fresh fetch** (`--source arxiv` to pin) | `curl http://export.arxiv.org/api/query?id_list=<arxiv_id>` — log label: `arxiv-api-abstract` |
+| 6 | **Page abstract — fallback** (last resort) | Reuse the existing `## Abstract (original)` blockquote already present in the page body from a prior `ingest_paper` run — log label: `page-abstract-fallback` |
+| — | **No identifier resolvable + no page abstract** | Skip this paper, log `"skip: <slug> (no resolvable identifier, no abstract)"`, continue |
 
 When trying alphaxiv: if WebFetch returns 404 / "Paper not found" / a redirect to the homepage, treat as miss and fall through.
+
+When trying paper-fetch (Tier 1): extract the DOI or arXiv ID from the paper's YAML frontmatter (`external_ids.doi` or `external_ids.arxiv`). If neither is present, skip to Tier 2. Call `mcp__paper-fetch__fetch_paper(query=<doi_or_arxiv_id>, save_markdown=true)`. If the call succeeds and the returned markdown has substantial body text (>2000 characters excluding references), use the fetched markdown directly as `$SOURCE_TEXT` and log source as `paper-fetch`. If paper-fetch fails or returns metadata-only, fall through to Tier 2. The paper-fetch output is already saved to `research-wiki/papers/` by the MCP tool's default settings — no extra save step needed.
 
 When trying deepxiv: resolve `$DEEPXIV_FETCHER` per `shared-references/integration-contract.md`. If the helper or `deepxiv` CLI is missing, fall through silently.
 
@@ -194,7 +197,7 @@ _TODO._
 python3 "$WIKI_SCRIPT" log research-wiki/ "wiki-enrich: enriched paper:<slug> from <source> (filled N/M sections)"
 ```
 
-Record which source provided content (`alphaxiv-overview`, `alphaxiv-abs`, `deepxiv-brief`, `arxiv-api-abstract`, or `page-abstract-fallback`) so the audit trail is honest about provenance.
+Record which source provided content (`paper-fetch`, `alphaxiv-overview`, `alphaxiv-abs`, `deepxiv-brief`, `arxiv-api-abstract`, or `page-abstract-fallback`) so the audit trail is honest about provenance.
 
 ### Phase 3: Final report
 
@@ -209,10 +212,11 @@ Skipped:    Y  (reasons: already enriched / no arxiv id / fetch failed)
 Failed:     Z  (with paper + reason)
 
 Source breakdown:
-  alphaxiv-overview: A
-  alphaxiv-abs:      B
-  deepxiv-brief:     C
-  arxiv-api-abstract:     D
+  paper-fetch:           P
+  alphaxiv-overview:     A
+  alphaxiv-abs:          B
+  deepxiv-brief:         C
+  arxiv-api-abstract:    D
   page-abstract-fallback: E
 
 Re-ideation suggestion: <if ≥5 papers were enriched, recommend `/idea-creator "topic"` so the freshly-filled `Reusable Ingredients` and `Limitations` feed brainstorming. `query_pack.md` is already rebuilt below — the user does NOT need to call `/research-wiki query` manually.>
