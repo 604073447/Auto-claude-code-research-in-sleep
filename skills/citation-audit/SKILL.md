@@ -2,7 +2,7 @@
 name: citation-audit
 description: "Zero-context verification that every bibliographic entry in the paper is real, correctly attributed, and used in a context the cited paper actually supports — catching hallucinated authors, wrong years, fabricated venues, version mismatches, and wrong-context citations. Use when user says \"审查引用\", \"check citations\", \"citation audit\", \"verify references\", \"引用核对\", or before submission to ensure bibliography integrity."
 argument-hint: "[paper-directory-or-bib-file] [--uncited] [— soft-only]"
-allowed-tools: Bash(*), Read, Grep, Glob, Edit, Write, mcp__codex__codex, WebSearch, WebFetch
+allowed-tools: Bash(*), Read, Grep, Glob, Edit, Write, mcp__codex__codex, WebSearch, WebFetch, mcp__paper-fetch__fetch_paper, mcp__paper-fetch__has_fulltext, mcp__paper-fetch__resolve_paper
 ---
 
 # Citation Audit
@@ -80,6 +80,26 @@ If the user passed `--uncited`, also compute the set difference `bib_keys \ cite
 
 Save the extracted contexts to `paper/.aris/citation-audit/contexts.txt` so the reviewer can read it directly. Use the paper-dir-relative path `.aris/citation-audit/contexts.txt` when recording the file in `audited_input_hashes`; do not stage under `/tmp` or other transient locations that the verifier cannot rehash later.
 
+### Step 2.5: Pre-fetch cited papers for context verification
+
+For citations where the context judgment is critical (e.g., the claim being
+supported is a quantitative comparison or a strong methodological assertion),
+pre-fetch the cited paper's full text before sending to the reviewer.
+
+1. Extract the DOI or arXiv ID from each bib entry being audited
+2. For entries where **both** a resolvable identifier exists **and** at least
+   one citing context makes a claim that needs source-level verification:
+   - Call `mcp__paper-fetch__fetch_paper(query=<doi_or_arxiv_id>)` to obtain the cited paper's full-text Markdown
+   - Extract the relevant sections (abstract, introduction, results/conclusion)
+   - Include these excerpts alongside the bib entry in the reviewer prompt below
+3. For entries without a resolvable identifier, the reviewer uses WebSearch
+   as before — no degradation from current behavior
+4. If paper-fetch MCP is unavailable, skip this step and proceed as usual
+
+This pre-fetching significantly improves Layer 3 (context) accuracy because
+the reviewer can compare the citing claim against the cited paper's actual
+text rather than inferring from abstracts and search snippets.
+
 ### Step 3: Send each entry to fresh cross-model reviewer
 
 For each **cited** bib entry — i.e., each key in `cited_keys` with at least one extracted citation context — invoke `mcp__codex__codex` (NOT `codex-reply` — fresh thread per entry, or batch with explicit per-entry isolation). Do **not** send entries in `bib_keys \ cited_keys` to the reviewer; those are detect-only and surface only when `--uncited` is explicitly enabled (see "Uncited Entry Detection" below).
@@ -100,12 +120,18 @@ mcp__codex__codex:
     ## Where this entry is cited in the paper
     [paste extracted contexts]
 
+    ## Cited paper excerpts (if pre-fetched via paper-fetch, Step 2.5)
+    [paste relevant sections: abstract, introduction, results — may be empty
+     if the paper was not pre-fetched or is behind a paywall]
+
     For this entry, verify:
     1. EXISTENCE: does this paper exist at the claimed arXiv ID / DOI / venue?
        Output: YES / NO / UNCERTAIN, with the verifying URL.
     2. METADATA: are author names, year, venue, title correct?
        For each, output: correct / wrong: should be ... / typo: ...
     3. CONTEXT: for each use, does the cited paper actually support the surrounding claim?
+       If cited paper excerpts are provided above, compare the citing claim DIRECTLY
+       against the cited text — not against what you assume the paper says.
        Output per-use: SUPPORTS / WEAK / WRONG, with one-sentence reasoning.
 
     VERDICT: KEEP / FIX / REPLACE / REMOVE

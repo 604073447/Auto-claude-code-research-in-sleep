@@ -2,7 +2,7 @@
 name: research-lit
 description: Search and analyze research papers, find related work, summarize key ideas. Use when user says "find papers", "related work", "literature review", "what does this paper say", or needs to understand academic papers.
 argument-hint: [paper-topic-or-url]
-allowed-tools: Bash(*), Read, Glob, Grep, WebSearch, WebFetch, Write, Agent, mcp__zotero__*, mcp__obsidian-vault__*
+allowed-tools: Bash(*), Read, Glob, Grep, WebSearch, WebFetch, Write, Agent, mcp__zotero__*, mcp__obsidian-vault__*, mcp__paper-fetch__fetch_paper, mcp__paper-fetch__has_fulltext, mcp__paper-fetch__resolve_paper, mcp__scansci-pdf__scansci_pdf_smart_download
 ---
 
 # Research Literature Review
@@ -716,6 +716,35 @@ python3 "$WIKI_SCRIPT" ingest_paper research-wiki/ \
     --title "<full title>" --authors "A, B, C" --year <yyyy> \
     --venue "<venue>" [--external-id-doi "<doi>"] [--thesis "..."]
 ```
+
+### Step 7: Fetch Full Text & PDF for Top Papers
+
+After Wiki ingest, fetch complete paper content for the top 5 most relevant
+papers. This transforms the wiki from abstract-only scaffolds to
+full-content knowledge, enabling deep reading in downstream skills
+(`/idea-creator`, `/wiki-enrich`, `/novelty-check`).
+
+**Skip this step entirely if paper-fetch MCP or scansci-pdf MCP is not available.**
+
+For each of the top 5 papers (ranked by relevance from Step 1-2):
+
+1. **Fetch Markdown full text** via paper-fetch:
+   - Extract the DOI or arXiv ID from the paper's metadata
+   - Call `mcp__paper-fetch__fetch_paper(query=<doi_or_arxiv_id>)` — defaults to `save_markdown=true, artifact_mode=all, asset_profile=all`, so the markdown body and figures are automatically saved to `research-wiki/papers/`
+   - If paper-fetch is unavailable or fails, skip this paper and continue to the next
+
+2. **Download PDF** via scansci-pdf (runs in parallel, independent):
+   - Call `mcp__scansci-pdf__scansci_pdf_smart_download(identifier=<doi_or_arxiv_id>)` — PDF is saved to `research-wiki/papers/` by scansci-pdf's configured output directory
+   - If scansci-pdf fails, the Markdown from step 1 is still available
+
+Both tools save to `research-wiki/papers/` — they share the same output
+directory, so paper artifacts (`.md`, `.pdf`, `assets/`) accumulate in one
+place. The wiki page (`<slug>.md`) created by Step 6 stores structured
+metadata; the paper-fetch markdown is the full-text body; the scansci-pdf
+output is the archival PDF.
+
+Log each fetch attempt with outcome and source paper, so the user can see
+what was obtained and what needs manual retrieval.
 
 ## Key Rules
 - Always include paper citations (authors, year, venue)
